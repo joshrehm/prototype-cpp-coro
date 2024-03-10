@@ -1,0 +1,12 @@
+[requires]
+fmt/10.2.1
+
+[test_requires]
+catch2/3.5.3
+
+[tool_requires]
+cppcheck/2.13.3
+
+[generators]
+CMakeDeps
+CMakeToolchain
