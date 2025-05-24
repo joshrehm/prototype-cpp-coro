@@ -30,3 +30,7 @@ private:
 	std::mutex lock_;
 	bool running_;
 };
+
+namespace this_scheduler {
+	scheduler& get();
+}

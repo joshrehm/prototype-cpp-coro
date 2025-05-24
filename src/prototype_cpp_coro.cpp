@@ -1,77 +1,55 @@
 #include"prototype_cpp_coro/prototype_cpp_coro.h"
 #include"prototype_cpp_coro/scheduler.h"
 #include"prototype_cpp_coro/task.h"
+#include<cassert>
 #include<future>
+#include<iostream>
 #include<thread>
 
-task<int> coro_main(int arg, char* argv[]);
+task<int> coro_main(int argc, char* argv[]);
 
 namespace {
-    struct main_task
+    // TODO: put async_scheduler, set_default_work_scheduler, and begin_async_task in
+    //       a header/implementation. But we're just prototyping.
+    scheduler* async_scheduler = nullptr;
+
+    void set_default_work_scheduler(scheduler& scheduler) 
     {
-        struct promise_type;
-        using handle_type = std::coroutine_handle<promise_type>;
-        
-        struct promise_type
+        assert(async_scheduler == nullptr);
+        async_scheduler = &scheduler;
+    }
+
+    // TODO: Make void versions of this
+    // TODO: Make auto-deduce return value version of this
+
+    template<typename TResult, typename TCallable>
+    task<TResult> begin_scheduled_task(scheduler& s, TCallable&& invoke)
+    {
+        struct awaiter
         {
-            int exit_code;
-            scheduler* sched;
-            std::exception_ptr ex;
+            scheduler* my_sheduler;
+            std::function<TResult()> callable;
 
-            promise_type(scheduler& scheduler, int, char*[]) :
-                    sched(&scheduler)
-                { }
-
-            auto get_return_object()
-                { return main_task { handle_type::from_promise(*this) }; }
-
-            auto initial_suspend() const noexcept
-            {
-                struct awaiter
-                {
-                    scheduler* sched;
-                    bool await_ready() const noexcept
-                        { return false; }
-                    void await_suspend(std::coroutine_handle<> h)
-                        { sched->enqueue(h); }
-                    void await_resume()
-                        { }
-                };
-                return awaiter { sched };
-            }
-
-            std::suspend_always final_suspend() const noexcept
-                { return {}; }
-
-            void return_value(int ec) noexcept
-                { exit_code = ec; }
-            
-            void unhandled_exception()
-                { ex = std::current_exception(); }
+            bool await_ready() const noexcept{ return false; };
+            void await_suspend(std::coroutine_handle<> h) noexcept
+                { my_sheduler->enqueue(h); }
+            TResult await_resume()
+                { return callable(); }
         };
 
-        handle_type handle;
-        main_task(handle_type h) :
-            handle(h)
-        {
-        }
+        co_return co_await awaiter { async_scheduler, std::move(invoke) };
+    }
 
-        ~main_task()
-        {
-            if (handle)
-                handle.destroy();
-        }
-
-        int exit_code() const noexcept
-        {
-            if (handle.promise().ex)
-                std::rethrow_exception(handle.promise().ex);
-            return handle.promise().exit_code;
-        }
-    };
-
-    main_task begin_main(scheduler& s, int argc, char* argv[])
+    template<typename TResult, typename TCallable>
+    task<TResult> begin_async_task(TCallable&& invoke)
     {
+        co_return co_await begin_scheduled_task<TResult>(*async_scheduler,
+            std::forward<TCallable>(invoke));
+    }
+
+    task<int> begin_main(scheduler& s, int argc, char* argv[])
+    {
+        // scheduler was captured by the task promise constructor
         auto result = co_await coro_main(argc, argv);
         s.stop();
 
@@ -82,6 +60,8 @@ namespace {
 int main(int argc, char* argv[])
 {
     scheduler worker; 
+    set_default_work_scheduler(worker);
+
     std::promise<void> threads_signal;
     auto threads_ready = threads_signal.get_future();
 
@@ -101,10 +81,22 @@ int main(int argc, char* argv[])
     async.join();
 
     // NOTE: exit_code may throw. We don't worry about that, here.
-    return main.exit_code();
+    return main.result();
 }
 
 task<int> coro_main(int argc, char* argv[])
 {
-    co_return 0;
+    std::cout << "Executed `main` on " << std::this_thread::get_id() << ".\n";
+    
+    // TODO: Auto-deduce return type
+    // TODO: Make begin_async_task handle callables that are also coroutines
+    auto result = co_await begin_async_task<int>([]() -> int {
+            std::cout << "Executed on worker thread " << std::this_thread::get_id() << ".\n";
+            return 5;
+        });
+
+    std::cout << "Resumed `main` on " << std::this_thread::get_id() 
+              << ". Result of task was " << result << ".\n";
+
+    co_return result;
 }

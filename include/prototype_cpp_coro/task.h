@@ -1,44 +1,67 @@
 #pragma once
 
+#include"scheduler.h"
+#include<chrono>
 #include<coroutine>
+#include<future>
 
 namespace detail {
 	struct promise_type_base
 	{
-		std::exception_ptr ex;
+		std::exception_ptr ex_;
 		std::coroutine_handle<> awaiting_;
+		scheduler* awaiting_scheduler_;
+		scheduler* my_scheduler_;
 
-		std::suspend_never initial_suspend() const noexcept
-			{ return {}; }
+		promise_type_base() :
+			awaiting_scheduler_(nullptr),
+			my_scheduler_(nullptr)
+		{
+		}
 
-		auto final_suspend() const noexcept
-		{ 
+		auto initial_suspend() noexcept
+		{
 			struct awaiter
 			{
-				std::coroutine_handle<> awaiting;
-				awaiter(std::coroutine_handle<> awaiting) :
-					awaiting(awaiting)
-				{
-				}
+				scheduler* my_scheduler;
 				bool await_ready() const noexcept
 					{ return false; }
+
+				void await_suspend(std::coroutine_handle<> h) noexcept
+					{ my_scheduler->enqueue(h); }
+
+				void await_resume() const noexcept
+					{ }
+			};
+			if (my_scheduler_ == nullptr)
+				my_scheduler_ = &this_scheduler::get();
+			return awaiter{ my_scheduler_ };
+		}
+
+		auto final_suspend() const noexcept
+		{
+			struct awaiter
+			{
+				scheduler* awaiting_scheduler;
+				std::coroutine_handle<> awaiting;
+
+				bool await_ready() const noexcept
+					{ return false; }
+
+				void await_suspend(std::coroutine_handle<>) const noexcept
+				{
+					if (awaiting_scheduler)
+						awaiting_scheduler->enqueue(awaiting); 
+				}
 				
 				void await_resume() const noexcept
 					{ }
-
-				auto await_suspend(std::coroutine_handle<>) const noexcept
-					-> std::coroutine_handle<>
-				{
-					if (!awaiting)
-						return std::noop_coroutine();
-					return awaiting;
-				}
 			};
-			return awaiter{ awaiting_ };
+			return awaiter { awaiting_scheduler_, awaiting_ };
 		}
 
 		void unhandled_exception() noexcept
-			{ ex = std::current_exception(); }
+			{ ex_ = std::current_exception(); }
 	};
 }
 
@@ -52,15 +75,27 @@ public:
 public:
 	struct promise_type : public detail::promise_type_base
 	{
-		T result;
+		std::promise<T> promise;
+		std::future<T> future;
+
+		promise_type() :
+			future(promise.get_future())
+		{
+		}
+
+		template<typename... TIgnoreArgs>
+		promise_type(scheduler& scheduler, TIgnoreArgs&&...) :
+			promise_type()
+		{
+			my_scheduler_ = &scheduler;
+		}
 
 		auto get_return_object() noexcept
 			{ return task { handle_type::from_promise(*this) }; }
 
-		// TODO: Figure out big Ts since we're passing by value
-		// TODO: Set noexcept if copying/moving T is noexcept
-		void return_value(T value)
-			{ result = value; }
+		template<typename U>
+		void return_value(U&& value)
+			{ promise.set_value(std::forward<U>(value)); }
 	};
 
 
@@ -103,22 +138,31 @@ public:
 
 public:
 	bool await_ready() noexcept
-		{ return handle_.done(); }
+	{
+		using namespace std::chrono_literals;
+		return handle_.promise().future.wait_for(0s) == std::future_status::ready;
+	}
 
 	void await_suspend(std::coroutine_handle<> awaiting) noexcept
-		{ handle_.promise().awaiting_ = awaiting; }
+	{
+		handle_.promise().awaiting_scheduler_ = &this_scheduler::get();
+		handle_.promise().awaiting_ = awaiting; 
+	}
 
 	T await_resume()
-	{
-		if (handle_.promise().ex)
-			std::rethrow_exception(handle_.promise().ex); 
-		return handle_.promise().result; 
-	}
+		{ return result(); }
 
 public:
 	// TODO: Figure out big Ts
 	T result()
-		{ return handle_.promise().result; }
+	{ 
+		// TODO: this check on ex_ may not be thread safe if result() is called
+		//       by other threads. We handle this with future on value, but not
+		//       for the exception. Could just say it's undefined and call it a day.
+		if (handle_.promise().ex_)
+			std::rethrow_exception(handle_.promise().ex_);
+		return handle_.promise().future.get(); 
+	}
 
 private:
 	handle_type handle_;
@@ -135,10 +179,26 @@ public:
 public:
 	struct promise_type : public detail::promise_type_base
 	{
+		std::promise<void> promise;
+		std::future<void> future;
+		
+		promise_type() :
+			future(promise.get_future())
+		{
+		}
+		
+		template<typename... TIgnoreArgs>
+		promise_type(scheduler& scheduler, TIgnoreArgs&&...) :
+			promise_type()
+		{
+			my_scheduler_ = &scheduler;
+		}
+
 		auto get_return_object()
 			{ return task { handle_type::from_promise(*this) }; }
 
-		void return_void() const noexcept {}
+		void return_void()
+			{ promise.set_value(); }
 	};
 
 public:
@@ -168,18 +228,27 @@ public:
 
 public:
 	bool await_ready() noexcept
-		{ return handle_.done(); }
+	{
+		using namespace std::chrono_literals;
+		return handle_.promise().future.wait_for(0s) == std::future_status::ready;
+	}
 
 	void await_suspend(std::coroutine_handle<> awaiting) noexcept
-		{ handle_.promise().awaiting_ = awaiting; }
+	{
+		handle_.promise().awaiting_scheduler_ = &this_scheduler::get();
+		handle_.promise().awaiting_ = awaiting; 
+	}
 
 	void await_resume()
-	{ 
-		if (handle_.promise().ex)
-			std::rethrow_exception(handle_.promise().ex);
+		{ result(); }
+
+	void result()
+	{
+		if (handle_.promise().ex_)
+			std::rethrow_exception(handle_.promise().ex_);
+		handle_.promise().future.get();
 	}
 
 private:
 	handle_type handle_;
-	std::exception_ptr exception_;
 };
