@@ -5,6 +5,11 @@
 #include<mutex>
 #include<queue>
 
+// A scheduler for coroutines. Allows coroutines to be enqueued by task<T>
+// for resumption on a dedicated thread. Each thread may have one, and only
+// one, scheduler running at any given time. A thread's scheduler can be
+// accessed by `this_scheduler::get()`. The scheduler `run()` blocks until
+// `stop()` is called.
 class scheduler 
 {
 public:
