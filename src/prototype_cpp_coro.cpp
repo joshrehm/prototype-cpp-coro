@@ -32,19 +32,32 @@ namespace {
     template<typename TResult, typename TCallable>
     task<TResult> begin_scheduled_task(scheduler& s, TCallable&& invoke)
     {
+        // `co_await` only requires an awaiter, which is used to schedule
+        // resumption of the coroutine when a task is completed.
+        //
+        // This awaiter is responsible for queuing the exceution of `invoke`
+        // on the specifed scheduler.
         struct awaiter
         {
-            scheduler* my_sheduler;
-            std::function<TResult()> callable;
+            scheduler* my_scheduler;            // The scheduler 
+            std::function<TResult()> callable;  // The function to call
 
+            // We didn't execute the function, so our coroutine needs to be
+            // suspended.
             bool await_ready() const noexcept{ return false; };
+
+            // When we're suspended, enqueue resumption of the coroutine on
+            // the specified scheduler
             void await_suspend(std::coroutine_handle<> h) noexcept
-                { my_sheduler->enqueue(h); }
+                { my_scheduler->enqueue(h); }
+
+            // When we resume on the appropriate scheduler, invoke the
+            // callable and return its result.
             TResult await_resume()
                 { return callable(); }
         };
 
-        co_return co_await awaiter { async_scheduler, std::move(invoke) };
+        co_return co_await awaiter { &s, std::move(invoke) };
     }
 
     // Executes the TCallable on the worker thread and allows the caller to
