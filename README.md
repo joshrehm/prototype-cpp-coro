@@ -4,18 +4,14 @@
 
 ## Requirements
 
- - Conan 2.0+
  - CMake 3.28+
 
 ## Configure Step
 
-This project integrates Conan 2 into the build process. Conan is automatically
-invoked during the cmake configuration process.
-
 To configure the project with tests:
 
 ```
-cmake --preset=<preset_name> -DPROTOTYPE_CPP_CORO_RUN_TESTS_ON_BUILD=ON
+cmake --preset=<preset_name>
 ```
 
 The `<preset_name>` placeholder should be an available preset defined in
@@ -29,10 +25,6 @@ CMakePresets.json:
 - linux-x86-release
 - linux-x64-debug
 - linux-x64-release
-
-If you do not want to run tests automatically, use `-DPROTOTYPE_CPP_CORO_ENABLE_TESTS=ON` 
-instead of `-DPROTOTYPE_CPP_CORO_RUN_TESTS_ON_BUILD=ON`. Omit both parameters
-to disable testing.
 
 Available cmake cache variables are described below:
 
@@ -50,11 +42,6 @@ Available cmake cache variables are described below:
  - `PROTOTYPE_CPP_CORO_OUTPUT_PATH`: Specifies the output path of this project's 
    built binaries. Unlike `PROJECT_OUTPUT_PATH`, this variable affects only this
    project. Defaults to `${PROJECT_OUTPUT_PATH}`.
- - `PROTOTYPE_CPP_CORO_ENABLE_TESTS`: Enable unit tests. `OFF` by default.
- - `PROTOTYPE_CPP_CORO_RUN_TESTS_ON_BUILD`: Run tests automatically after build.
-   Implies `PROTOTYPE_CPP_CORO_ENABLE_TESTS`. `OFF` by default.
- - `PROTOTYPE_CPP_CORO_ENABLE_CPPCHECK`: Enables cppcheck static analysis. `ON`
-   by default.
  - `PROTOTYPE_CPP_CORO_WARNINGS_AS_ERRORS`: Treats compiler warnings as errors.
    Set to `${WARNINGS_AS_ERRORS}` by default.
 
